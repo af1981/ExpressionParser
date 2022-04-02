@@ -1,0 +1,93 @@
+PL/SQL	
+
+----> QUERY A
+SELECT DISTINCT Customers.Name AS CustomerName, Products.Name AS ProductName, SUM(SalesItem.Amount) AS NumberOfPieces
+FROM Customers, SalesItem, Sales, Products
+WHERE (Customers.CustomerID = Sales.CustomerID) AND (SalesItem.TranID = Sales.TranID) AND (Products.ProductID = SalesItem.ProductID)
+GROUP BY SalesItem.ProductID, Sales.CustomerID, Customers.Name, Products.Name
+HAVING SUM(SalesItem.Amount) >= 10;
+
+----> QUERY B
+SELECT Products.Name AS ProductName, SUM(SalesItem.Amount) AS NumberOfPieces
+FROM SalesItem, Sales, Products
+WHERE (SalesItem.TranID = Sales.TranID) AND (Products.ProductID = SalesItem.ProductID) AND 
+		(Sales.DateTime >= to_date('01-01-2010 00:00:00','DD-MM-YYYY HH24:MI:SS')) AND
+		(Sales.DateTime < to_date('01-01-2016 00:00:00','DD-MM-YYYY HH24:MI:SS'))
+GROUP BY Products.ProductID, Products.Name
+ORDER BY SUM(SalesItem.Amount) DESC, Products.Name;
+
+----> QUERY C
+CREATE VIEW ProductPricesForMinView AS
+SELECT ProductPricesA.ProductID AS ProductID, ProductPricesA.ValidFrom AS ValidFrom, MIN(ProductPricesB.ValidFrom-ProductPricesA.ValidFrom) AS MinDays 
+FROM ProductPrices ProductPricesA, ProductPrices ProductPricesB 
+WHERE ProductPricesA.ProductID = ProductPricesB.ProductID
+GROUP BY ProductPricesA.ProductID, ProductPricesA.ValidFrom;
+
+CREATE VIEW ProductPricesCompleteView AS
+SELECT ProductPricesA.ProductID AS ProductID, ProductPricesA.Price AS Price, ProductPricesA.ValidFrom AS ValidFrom, ProductPricesB.ValidFrom AS ValidTo
+FROM ProductPrices ProductPricesA, ProductPrices ProductPricesB, ProductPricesForMinView
+WHERE (ProductPricesA.ProductID = ProductPricesB.ProductID) AND
+		(ProductPricesA.ProductID = ProductPricesForMinView.ProductID) AND
+		(ProductPricesA.ValidFrom = ProductPricesForMinView.ValidFrom) AND
+		(ProductPricesB.ValidFrom-ProductPricesA.ValidFrom = ProductPricesForMinView.MinDays);
+
+SELECT Customers.CustomerID AS CustomerID, Customers.Name AS CustomerName, SUM(SalesItem.Amount*ProductPricesCompleteView.Price) AS NumberOfPieces
+FROM Customers, SalesItem, Sales, ProductPricesCompleteView
+WHERE (Customers.CustomerID = Sales.CustomerID) AND (SalesItem.TranID = Sales.TranID) AND (SalesItem.ProductID = ProductPricesCompleteView.ProductID) AND
+		(Sales.DateTime>=ProductPricesCompleteView.ValidFrom) AND (Sales.DateTime<ProductPricesCompleteView.ValidTo)
+GROUP BY Customers.CustomerID, Customers.Name;
+
+---> QUERY D [Without "If two or more products compete for that position in a year, select the one with the greatest number of unique customers who bought the product that year."]
+CREATE VIEW SalesItemView AS
+SELECT SalesItem.ProductID AS ProductID, EXTRACT(YEAR FROM Sales.DateTime) AS Year, SalesItem.Amount AS Amount
+FROM SalesItem, Sales
+WHERE (SalesItem.TranID = Sales.TranID);
+
+CREATE VIEW TotalSalesView AS
+SELECT SalesItemView.ProductID AS ProductID, SalesItemView.Year AS Year, SUM(SalesItemView.Amount) AS TotalSold
+FROM SalesItemView
+GROUP BY SalesItemView.ProductID, SalesItemView.Year;
+
+CREATE VIEW MaxTotalSalesView AS
+SELECT TotalSalesView.Year AS Year, MAX(TotalSalesView.TotalSold) AS MaxTotalSold
+FROM TotalSalesView
+GROUP BY TotalSalesView.Year;
+
+SELECT TotalSalesView.Year AS Year, Products.Name AS Name, TotalSalesView.TotalSold AS TotalSold
+FROM TotalSalesView, MaxTotalSalesView, Products
+WHERE (TotalSalesView.Year = MaxTotalSalesView.Year) AND (TotalSalesView.TotalSold=MaxTotalSalesView.MaxTotalSold) AND (Products.ProductID= TotalSalesView.ProductID);
+
+---> QUERY D [With "If two or more products compete for that position in a year, select the one with the greatest number of unique customers who bought the product that year."]
+CREATE VIEW SalesItemView AS
+SELECT SalesItem.ProductID AS ProductID, EXTRACT(YEAR FROM Sales.DateTime) AS Year, SalesItem.Amount AS Amount, Sales.CustomerID AS CustomerID
+FROM SalesItem, Sales
+WHERE (SalesItem.TranID = Sales.TranID);
+
+CREATE VIEW TotalSalesView AS
+SELECT SalesItemView.ProductID AS ProductID, SalesItemView.Year AS Year, SUM(SalesItemView.Amount) AS TotalSold, COUNT(DISTINCT SalesItemView.CustomerID) AS TotalCustomer
+FROM SalesItemView
+GROUP BY SalesItemView.ProductID, SalesItemView.Year;
+
+CREATE VIEW MaxTotalSalesView AS
+SELECT TotalSalesView.Year AS Year, MAX(TotalSalesView.TotalSold) AS MaxTotalSold
+FROM TotalSalesView
+GROUP BY TotalSalesView.Year;
+
+CREATE VIEW FinalView AS
+SELECT TotalSalesView.Year AS Year, TotalSalesView.ProductID AS ProductID, TotalSalesView.TotalSold AS TotalSold, TotalSalesView.TotalCustomer AS TotalCustomer
+FROM TotalSalesView, MaxTotalSalesView
+WHERE (TotalSalesView.Year = MaxTotalSalesView.Year) AND (TotalSalesView.TotalSold=MaxTotalSalesView.MaxTotalSold);
+
+CREATE VIEW MaxTotalCustomerView AS
+SELECT FinalView.Year AS Year, FinalView.ProductID AS ProductID, MAX(FinalView.TotalCustomer) AS MaxTotalCustomer
+FROM FinalView
+GROUP BY FinalView.Year, FinalView.ProductID;
+
+SELECT FinalView.Year AS Year, Products.Name AS Name, FinalView.TotalSold AS TotalSold
+FROM FinalView, MaxTotalCustomerView, Products
+WHERE (MaxTotalCustomerView.Year=FinalView.Year) AND (MaxTotalCustomerView.ProductID=FinalView.ProductID) AND (MaxTotalCustomerView.MaxTotalCustomer=FinalView.TotalCustomer) AND (Products.ProductID=FinalView.ProductID);
+
+
+
+
+
